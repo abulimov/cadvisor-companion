@@ -156,6 +156,9 @@ func getTopCPU(dockerID string, limit int) ([]customProcs, error) {
 		return nil, err
 	}
 	sort.Sort(sort.Reverse(byCPU(procs)))
+	if limit > len(procs) {
+		limit = len(procs)
+	}
 	var result []customProcs
 	for _, p := range procs[:limit] {
 		result = append(result, p)
@@ -171,6 +174,9 @@ func getTopMem(dockerID string, limit int) ([]customProcs, error) {
 		return nil, err
 	}
 	sort.Sort(sort.Reverse(byRSS(procs)))
+	if limit > len(procs) {
+		limit = len(procs)
+	}
 	var result []customProcs
 	for _, p := range procs[:limit] {
 		result = append(result, p)
@@ -212,23 +218,26 @@ func getDockerIDs() ([]string, error) {
 	return results, nil
 }
 
-// httpHandler handles requests
+// httpHandler handles http requests
 func httpHandler(res http.ResponseWriter, req *http.Request) {
 	var validPath = regexp.MustCompile("^/([a-zA-Z0-9]+)/(mem|cpu|all)$")
 	m := validPath.FindStringSubmatch(req.URL.Path)
-	//dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
 	if m == nil {
 		http.NotFound(res, req)
 		return
 	}
+	limitStr := req.URL.Query().Get("limit")
+	limit, err := strconv.ParseInt(limitStr, 10, 0)
+	if err != nil || limit < 1 {
+		limit = 5
+	}
 	dockerID := m[1]
 	var result []customProcs
-	var err error
 	switch m[2] {
 	case "cpu":
-		result, err = getTopCPU(dockerID, 5)
+		result, err = getTopCPU(dockerID, int(limit))
 	case "mem":
-		result, err = getTopMem(dockerID, 5)
+		result, err = getTopMem(dockerID, int(limit))
 	case "all":
 		result, err = getLastData(dockerID)
 	}
