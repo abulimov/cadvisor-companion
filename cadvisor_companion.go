@@ -6,6 +6,7 @@ import (
 	"io"
 	"io/ioutil"
 	"net/http"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -42,13 +43,13 @@ func (p byCPU) Less(i, j int) bool {
 	return p[i].CPUUsage < p[j].CPUUsage
 }
 
-var chanProc chan []linuxproc.Process
-var chanCPU chan uint64
-
-type historyEntry struct {
+type dockerSnapshot struct {
 	processes []linuxproc.Process
 	cpuStat   uint64
 }
+type historyEntry map[string]dockerSnapshot
+
+var channel chan historyEntry
 
 var history [60]historyEntry
 
@@ -98,7 +99,7 @@ func getCPUTotalUsage(dockerID string) (uint64, error) {
 	return total, nil
 }
 
-func getProc(pid uint64, procs []linuxproc.Process) *linuxproc.Process {
+func findProc(pid uint64, procs []linuxproc.Process) *linuxproc.Process {
 	for _, p := range procs {
 		if p.Status.Pid == pid {
 			return &p
@@ -111,16 +112,16 @@ func getLastData(dockerID string) ([]customProcs, error) {
 	last := len(history) - 1
 	first := last
 	for i, e := range history {
-		if len(e.processes) > 0 {
+		if len(e[dockerID].processes) > 0 {
 			first = i
 			break
 		}
 	}
-	entry1 := history[first]
-	entry2 := history[last]
+	entry1 := history[first][dockerID]
+	entry2 := history[last][dockerID]
 	var procs []customProcs
 	for _, p2 := range entry2.processes {
-		p1 := getProc(p2.Status.Pid, entry1.processes)
+		p1 := findProc(p2.Status.Pid, entry1.processes)
 		if p1 != nil {
 			user := int64(p2.Stat.Utime-p1.Stat.Utime) + (p2.Stat.Cutime - p1.Stat.Cutime)
 			system := int64(p2.Stat.Stime-p1.Stat.Stime) + (p2.Stat.Cstime - p1.Stat.Cstime)
@@ -160,6 +161,40 @@ func getTopMem(dockerID string, limit int) ([]customProcs, error) {
 	return result, nil
 }
 
+func getDockerIDs() ([]string, error) {
+	d, err := os.Open("/sys/fs/cgroup/cpu/docker")
+	if err != nil {
+		return nil, err
+	}
+	defer d.Close()
+
+	results := make([]string, 0, 50)
+	for {
+		fis, err := d.Readdir(10)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		for _, fi := range fis {
+			// We only care about directories, since all pids are dirs
+			if !fi.IsDir() {
+				continue
+			}
+
+			// We only care if the name starts with a numeric
+			name := fi.Name()
+			if len(name) > '8' {
+				results = append(results, name)
+			}
+		}
+	}
+
+	return results, nil
+}
+
 func memHandler(res http.ResponseWriter, req *http.Request) {
 	dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
 	result, err := getTopMem(dockerID, 5)
@@ -189,29 +224,33 @@ func cpuHandler(res http.ResponseWriter, req *http.Request) {
 }
 
 func collectData() {
-	dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
+	dockerIDs, err := getDockerIDs()
+	if err != nil {
+		fmt.Println(err)
+	}
 	for {
-		res, _ := getProcesses(dockerID)
-		cpu, _ := getCPUTotalUsage(dockerID)
-		chanProc <- res
-		chanCPU <- cpu
+		entry := make(historyEntry)
+		for _, id := range dockerIDs {
+			res, _ := getProcesses(id)
+			cpu, _ := getCPUTotalUsage(id)
+			entry[id] = dockerSnapshot{res, cpu}
+		}
+		channel <- entry
 		time.Sleep(time.Second)
 	}
 }
 func getData() {
 	for {
-		procs := <-chanProc
-		cpu := <-chanCPU
+		entry := <-channel
 		for i, v := range history[1:] {
 			history[i] = v
 		}
-		history[59] = historyEntry{procs, cpu}
+		history[59] = entry
 	}
 }
 
 func main() {
-	chanProc = make(chan []linuxproc.Process)
-	chanCPU = make(chan uint64)
+	channel = make(chan historyEntry)
 	go collectData()
 	go getData()
 	http.HandleFunc("/mem", memHandler)
