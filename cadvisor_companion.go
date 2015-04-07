@@ -14,7 +14,13 @@ import (
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
 
-type byRSS []linuxproc.Process
+type customProcs struct {
+	linuxproc.Process
+	CPUUsage float64
+}
+
+type byCPU []customProcs
+type byRSS []customProcs
 
 func (p byRSS) Len() int {
 	return len(p)
@@ -25,13 +31,6 @@ func (p byRSS) Swap(i, j int) {
 func (p byRSS) Less(i, j int) bool {
 	return p[i].Status.VmRSS < p[j].Status.VmRSS
 }
-
-type simpleProcs struct {
-	linuxproc.Process
-	CPUUsage float64
-}
-
-type byCPU []simpleProcs
 
 func (p byCPU) Len() int {
 	return len(p)
@@ -108,7 +107,7 @@ func getProc(pid uint64, procs []linuxproc.Process) *linuxproc.Process {
 	return nil
 }
 
-func getTopCPU(dockerID string, limit int) ([]simpleProcs, error) {
+func getLastData(dockerID string) ([]customProcs, error) {
 	last := len(history) - 1
 	first := last
 	for i, e := range history {
@@ -119,33 +118,41 @@ func getTopCPU(dockerID string, limit int) ([]simpleProcs, error) {
 	}
 	entry1 := history[first]
 	entry2 := history[last]
-	var procs []simpleProcs
+	var procs []customProcs
 	for _, p2 := range entry2.processes {
 		p1 := getProc(p2.Status.Pid, entry1.processes)
 		if p1 != nil {
 			user := int64(p2.Stat.Utime-p1.Stat.Utime) + (p2.Stat.Cutime - p1.Stat.Cutime)
 			system := int64(p2.Stat.Stime-p1.Stat.Stime) + (p2.Stat.Cstime - p1.Stat.Cstime)
 			percent := (float64(user+system) / float64(entry2.cpuStat-entry1.cpuStat)) * 100
-			procs = append(procs, simpleProcs{p2, percent})
+			procs = append(procs, customProcs{p2, percent})
 		}
 
 	}
+	return procs, nil
+}
+
+func getTopCPU(dockerID string, limit int) ([]customProcs, error) {
+	procs, err := getLastData(dockerID)
+	if err != nil {
+		return nil, err
+	}
 	sort.Sort(sort.Reverse(byCPU(procs)))
-	var result []simpleProcs
+	var result []customProcs
 	for _, p := range procs[:limit] {
 		result = append(result, p)
-		fmt.Printf("%f%% CPU %s\n", p.CPUUsage, p.Cmdline)
+		//fmt.Printf("%f%% CPU %s\n", p.CPUUsage, p.Cmdline)
 	}
 	return result, nil
 }
 
-func getTopMem(dockerID string, limit int) ([]linuxproc.Process, error) {
-	procs, err := getProcesses(dockerID)
+func getTopMem(dockerID string, limit int) ([]customProcs, error) {
+	procs, err := getLastData(dockerID)
 	if err != nil {
 		return nil, err
 	}
 	sort.Sort(sort.Reverse(byRSS(procs)))
-	var result []linuxproc.Process
+	var result []customProcs
 	for _, p := range procs[:limit] {
 		result = append(result, p)
 		//fmt.Printf("%dKb %s\n", p.Status.VmRSS, p.Cmdline)
