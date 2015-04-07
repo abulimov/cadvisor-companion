@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -211,25 +212,26 @@ func getDockerIDs() ([]string, error) {
 	return results, nil
 }
 
-// memHandler handles requests for top memory eaters
-func memHandler(res http.ResponseWriter, req *http.Request) {
-	dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
-	result, err := getTopMem(dockerID, 5)
-	if err != nil {
-		fmt.Println(err)
+// httpHandler handles requests
+func httpHandler(res http.ResponseWriter, req *http.Request) {
+	var validPath = regexp.MustCompile("^/([a-zA-Z0-9]+)/(mem|cpu|all)$")
+	m := validPath.FindStringSubmatch(req.URL.Path)
+	//dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
+	if m == nil {
+		http.NotFound(res, req)
+		return
 	}
-	jsonResult, _ := json.Marshal(result)
-	res.Header().Set(
-		"Content-Type",
-		"text/json",
-	)
-	io.WriteString(res, string(jsonResult))
-}
-
-// cpuHandler handles requests for top CPU eaters
-func cpuHandler(res http.ResponseWriter, req *http.Request) {
-	dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
-	result, err := getTopCPU(dockerID, 5)
+	dockerID := m[1]
+	var result []customProcs
+	var err error
+	switch m[2] {
+	case "cpu":
+		result, err = getTopCPU(dockerID, 5)
+	case "mem":
+		result, err = getTopMem(dockerID, 5)
+	case "all":
+		result, err = getLastData(dockerID)
+	}
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -276,7 +278,6 @@ func main() {
 	channel = make(chan historyEntry)
 	go collectData()
 	go processData()
-	http.HandleFunc("/mem", memHandler)
-	http.HandleFunc("/cpu", cpuHandler)
+	http.HandleFunc("/", httpHandler)
 	http.ListenAndServe(":8801", nil)
 }
