@@ -15,12 +15,17 @@ import (
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
 
+// customProcs is our extended linuxproc.Process type
+// with custom cpuUsage attribute
 type customProcs struct {
 	linuxproc.Process
 	CPUUsage float64
 }
 
+// byCPU helps us sort array of customProcs by CPUUsage
 type byCPU []customProcs
+
+// byRSS helps us sort array of customProcs by Status.VmRSS
 type byRSS []customProcs
 
 func (p byRSS) Len() int {
@@ -43,16 +48,22 @@ func (p byCPU) Less(i, j int) bool {
 	return p[i].CPUUsage < p[j].CPUUsage
 }
 
+// dockerSnapshot containes process list and cpu usage for some docker container
 type dockerSnapshot struct {
 	processes []linuxproc.Process
 	cpuStat   uint64
 }
+
+// historyEntry containes all dockerSnapshots for some moment in time
 type historyEntry map[string]dockerSnapshot
 
-var channel chan historyEntry
-
+// history holds RRD-like array of last 60 history entries
 var history [60]historyEntry
 
+// channel allows communication between data scrappers and data processors
+var channel chan historyEntry
+
+// getProcesses returns list of processes for given dockerID
 func getProcesses(dockerID string) ([]linuxproc.Process, error) {
 	tasksPath := fmt.Sprintf("/sys/fs/cgroup/cpu/docker/%s/tasks", dockerID)
 	dataBytes, err := ioutil.ReadFile(tasksPath)
@@ -78,6 +89,7 @@ func getProcesses(dockerID string) ([]linuxproc.Process, error) {
 	return procs, nil
 }
 
+// getCPUTotalUsage returns amount of CPU time, used by given docker container
 func getCPUTotalUsage(dockerID string) (uint64, error) {
 	cpuAcctPath := fmt.Sprintf("/sys/fs/cgroup/cpuacct/docker/%s/cpuacct.stat", dockerID)
 	dataBytes, err := ioutil.ReadFile(cpuAcctPath)
@@ -99,6 +111,8 @@ func getCPUTotalUsage(dockerID string) (uint64, error) {
 	return total, nil
 }
 
+// findProc searches for given pid in list of processes and returns
+// its process if found
 func findProc(pid uint64, procs []linuxproc.Process) *linuxproc.Process {
 	for _, p := range procs {
 		if p.Status.Pid == pid {
@@ -108,6 +122,7 @@ func findProc(pid uint64, procs []linuxproc.Process) *linuxproc.Process {
 	return nil
 }
 
+// getLastData returns latest data from history with added calculated CPU usage
 func getLastData(dockerID string) ([]customProcs, error) {
 	last := len(history) - 1
 	first := last
@@ -133,6 +148,7 @@ func getLastData(dockerID string) ([]customProcs, error) {
 	return procs, nil
 }
 
+// getTopCPU returns `limit` entries with top CPU usage
 func getTopCPU(dockerID string, limit int) ([]customProcs, error) {
 	procs, err := getLastData(dockerID)
 	if err != nil {
@@ -147,6 +163,7 @@ func getTopCPU(dockerID string, limit int) ([]customProcs, error) {
 	return result, nil
 }
 
+// getTopMem returns `limit` entries with top VmRSS usage
 func getTopMem(dockerID string, limit int) ([]customProcs, error) {
 	procs, err := getLastData(dockerID)
 	if err != nil {
@@ -161,6 +178,7 @@ func getTopMem(dockerID string, limit int) ([]customProcs, error) {
 	return result, nil
 }
 
+// getDockerIDs collects all docker ids from cgroups pseudo-filesystem
 func getDockerIDs() ([]string, error) {
 	d, err := os.Open("/sys/fs/cgroup/cpu/docker")
 	if err != nil {
@@ -183,8 +201,6 @@ func getDockerIDs() ([]string, error) {
 			if !fi.IsDir() {
 				continue
 			}
-
-			// We only care if the name starts with a numeric
 			name := fi.Name()
 			if len(name) > '8' {
 				results = append(results, name)
@@ -195,6 +211,7 @@ func getDockerIDs() ([]string, error) {
 	return results, nil
 }
 
+// memHandler handles requests for top memory eaters
 func memHandler(res http.ResponseWriter, req *http.Request) {
 	dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
 	result, err := getTopMem(dockerID, 5)
@@ -209,6 +226,7 @@ func memHandler(res http.ResponseWriter, req *http.Request) {
 	io.WriteString(res, string(jsonResult))
 }
 
+// cpuHandler handles requests for top CPU eaters
 func cpuHandler(res http.ResponseWriter, req *http.Request) {
 	dockerID := "f33b34a760f631a7176f10d9babab89c20dd0ebde744ed83b1ea27f21ce0bb75"
 	result, err := getTopCPU(dockerID, 5)
@@ -223,6 +241,8 @@ func cpuHandler(res http.ResponseWriter, req *http.Request) {
 	io.WriteString(res, string(jsonResult))
 }
 
+// collectData scrapes procs data for all docker containers
+// every second, and sends through channel to getData()
 func collectData() {
 	dockerIDs, err := getDockerIDs()
 	if err != nil {
@@ -239,7 +259,10 @@ func collectData() {
 		time.Sleep(time.Second)
 	}
 }
-func getData() {
+
+// processData processes data from collectData
+// and stores it inside global var history
+func processData() {
 	for {
 		entry := <-channel
 		for i, v := range history[1:] {
@@ -252,7 +275,7 @@ func getData() {
 func main() {
 	channel = make(chan historyEntry)
 	go collectData()
-	go getData()
+	go processData()
 	http.HandleFunc("/mem", memHandler)
 	http.HandleFunc("/cpu", cpuHandler)
 	http.ListenAndServe(":8801", nil)
