@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -15,6 +16,13 @@ import (
 
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
+
+var version = "0.0.1"
+
+// set up cli vars
+var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
+var argPort = flag.Int("port", 8801, "port to listen")
+var versionFlag = flag.Bool("version", false, "print cAdvisor-companion version and exit")
 
 // customProcs is our extended linuxproc.Process type
 // with custom cpuUsage attribute
@@ -60,9 +68,6 @@ type historyEntry map[string]dockerSnapshot
 
 // history holds RRD-like array of last 60 history entries
 var history [60]historyEntry
-
-// channel allows communication between data scrappers and data processors
-var channel chan historyEntry
 
 // getProcesses returns list of processes for given dockerID
 func getProcesses(dockerID string) ([]linuxproc.Process, error) {
@@ -266,27 +271,30 @@ func collectData() {
 			cpu, _ := getCPUTotalUsage(id)
 			entry[id] = dockerSnapshot{res, cpu}
 		}
-		channel <- entry
-		time.Sleep(time.Second)
-	}
-}
-
-// processData processes data from collectData
-// and stores it inside global var history
-func processData() {
-	for {
-		entry := <-channel
 		for i, v := range history[1:] {
 			history[i] = v
 		}
 		history[59] = entry
+		time.Sleep(time.Second)
 	}
 }
 
 func main() {
-	channel = make(chan historyEntry)
+	flag.Parse()
+
+	if *versionFlag {
+		fmt.Printf("cAdvisor-companion version %s\n", version)
+		os.Exit(0)
+	}
+
 	go collectData()
-	go processData()
+	//go processData()
+	addr := fmt.Sprintf("%s:%d", *argIP, *argPort)
+	fmt.Printf("Starting cAdvisor-companion version: %q on port %d\n", version, *argPort)
 	http.HandleFunc("/", httpHandler)
-	http.ListenAndServe(":8801", nil)
+	err := http.ListenAndServe(addr, nil)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
 }
