@@ -130,16 +130,18 @@ func getProcesses(rootPath string) ([]customProc, error) {
 			pid, err := strconv.ParseUint(name, 10, 64)
 
 			if err == nil {
-				p, err := linuxproc.ReadProcess(pid, path)
-				if err != nil {
-					continue
-				}
 				cgroup, err := readCgroup(pid, path)
 				if err != nil {
 					continue
 				}
-				if p.Cmdline != "" && p.Status.VmRSS > 0 && cgroup != "/" {
-					procs = append(procs, customProc{*p, 0, cgroup})
+				if cgroup != "/" {
+					p, err := linuxproc.ReadProcess(pid, path)
+					if err != nil {
+						continue
+					}
+					if p.Cmdline != "" && p.Status.VmRSS > 0 {
+						procs = append(procs, customProc{*p, 0, cgroup})
+					}
 				}
 			}
 		}
