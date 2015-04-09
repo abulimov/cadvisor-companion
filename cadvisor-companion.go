@@ -18,7 +18,7 @@ import (
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
 
-var version = "0.0.2"
+var version = "0.0.3"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -28,11 +28,18 @@ var versionFlag = flag.Bool("version", false, "print cAdvisor-companion version 
 // Process is our extended linuxproc.Process type
 // with custom cgroup and cpuUsage attributes
 type Process struct {
-	Status   linuxproc.ProcessStatus `json:"status"`
-	Stat     linuxproc.ProcessStat   `json:"stat"`
-	Cmdline  string                  `json:"cmdline"`
-	CPUUsage float64                 `json:"cpuusage"`
-	Cgroup   string                  `json:"cgroup"`
+	Status  linuxproc.ProcessStatus `json:"status"`
+	Stat    linuxproc.ProcessStat   `json:"stat"`
+	Cmdline string                  `json:"cmdline"`
+	// CPUUsage is the percent of total CPU time used by container
+	// that was used by this particular process in 1 minute.
+	// This value IS NOT traditional %CPU usage, which is the amount
+	// of total available CPU time, used by particular process.
+	// So, if all processes in given container used 10% of available host
+	// resources, CPUUsage of 90% would mean that this process used
+	// 9% of available host CPU resources.
+	CPUUsage float64 `json:"cpuusage"`
+	Cgroup   string  `json:"cgroup"`
 }
 
 // byCPU helps us sort array of Process by CPUUsage
@@ -61,14 +68,8 @@ func (p byCPU) Less(i, j int) bool {
 	return p[i].CPUUsage < p[j].CPUUsage
 }
 
-// dockerSnapshot containes process list and cpu usage for some docker container
-type dockerSnapshot struct {
-	processes []Process
-	cpuStat   uint64
-}
-
 // historyEntry containes all dockerSnapshots for some moment in time
-type historyEntry map[string]dockerSnapshot
+type historyEntry map[string][]Process
 
 // history holds RRD-like array of last 60 history entries
 var history [60]historyEntry
@@ -164,26 +165,15 @@ func getProcesses(rootPath string) ([]Process, error) {
 	return procs, nil
 }
 
-// getCPUTotalUsage returns amount of CPU time, used by given docker container
-func getCPUTotalUsage(dockerID string) (uint64, error) {
-	cpuAcctPath := fmt.Sprintf("/sys/fs/cgroup/cpuacct/%s/cpuacct.stat", dockerID)
-	dataBytes, err := ioutil.ReadFile(cpuAcctPath)
-	if err != nil {
-		return 0, nil
+// getCPUTotalUsage returns amount of CPU time used by list of give procs
+func getCPUTotalUsage(procs []Process) int64 {
+	totalUsage := int64(0)
+	for _, p := range procs {
+		user := int64(p.Stat.Utime) + p.Stat.Cutime
+		system := int64(p.Stat.Stime) + p.Stat.Cstime
+		totalUsage += user + system
 	}
-	cpuAcctString := string(dataBytes)
-	cpuAcct := strings.Split(cpuAcctString, "\n")
-	var total uint64
-	total = 0
-	for _, s := range cpuAcct {
-		splitted := strings.Split(s, " ")
-		if len(splitted) > 1 {
-			usage, _ := strconv.ParseUint(splitted[1], 10, 64)
-			total += usage
-		}
-	}
-
-	return total, nil
+	return totalUsage
 }
 
 // findProc searches for given pid in list of processes and returns
@@ -211,7 +201,7 @@ func getLastData(dockerID string) ([]Process, error) {
 	last := len(history) - 1
 	first := last
 	for i, e := range history {
-		if len(e[dockerID].processes) > 0 {
+		if len(e[dockerID]) > 0 {
 			first = i
 			break
 		}
@@ -219,24 +209,18 @@ func getLastData(dockerID string) ([]Process, error) {
 	entry1 := history[first][dockerID]
 	entry2 := history[last][dockerID]
 	var procs []Process
-	totalUsage := float64(0)
-	for _, p2 := range entry2.processes {
-		p1 := findProc(p2.Status.Pid, entry1.processes)
+	cpu1 := getCPUTotalUsage(entry1)
+	cpu2 := getCPUTotalUsage(entry2)
+	for _, p2 := range entry2 {
+		p1 := findProc(p2.Status.Pid, entry1)
 		if p1 != nil {
 			user := int64(p2.Stat.Utime-p1.Stat.Utime) + (p2.Stat.Cutime - p1.Stat.Cutime)
 			system := int64(p2.Stat.Stime-p1.Stat.Stime) + (p2.Stat.Cstime - p1.Stat.Cstime)
-			percent := (float64(user+system) / float64(entry2.cpuStat-entry1.cpuStat)) * 100
+			percent := (float64(user+system) / float64(cpu2-cpu1)) * 100
 			p2.CPUUsage = percent
-			totalUsage += percent
 			procs = append(procs, p2)
 		}
 
-	}
-	if totalUsage > 100 {
-		scale := 100.0 / totalUsage
-		for i, p := range procs {
-			procs[i].CPUUsage = scale * p.CPUUsage
-		}
 	}
 	return procs, nil
 }
@@ -315,13 +299,8 @@ func httpHandler(res http.ResponseWriter, req *http.Request) {
 // and keeps it in global history var
 func collectData(rootPath string) {
 	for {
-		entry := make(historyEntry)
-		res, _ := getProcesses(rootPath)
-		cgroups := getCgroupsProcs(res)
-		for cg, procs := range cgroups {
-			cpu, _ := getCPUTotalUsage(cg)
-			entry[cg] = dockerSnapshot{procs, cpu}
-		}
+		allProcs, _ := getProcesses(rootPath)
+		entry := getCgroupsProcs(allProcs)
 		for i, v := range history[1:] {
 			history[i] = v
 		}
