@@ -25,19 +25,21 @@ var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
 var argPort = flag.Int("port", 8801, "port to listen")
 var versionFlag = flag.Bool("version", false, "print cAdvisor-companion version and exit")
 
-// customProc is our extended linuxproc.Process type
+// Process is our extended linuxproc.Process type
 // with custom cgroup and cpuUsage attributes
-type customProc struct {
-	linuxproc.Process
+type Process struct {
+	Status   linuxproc.ProcessStatus `json:"status"`
+	Stat     linuxproc.ProcessStat   `json:"stat"`
+	Cmdline  string                  `json:"cmdline"`
 	CPUUsage float64
 	Cgroup   string
 }
 
-// byCPU helps us sort array of customProc by CPUUsage
-type byCPU []customProc
+// byCPU helps us sort array of Process by CPUUsage
+type byCPU []Process
 
-// byRSS helps us sort array of customProc by Status.VmRSS
-type byRSS []customProc
+// byRSS helps us sort array of Process by Status.VmRSS
+type byRSS []Process
 
 func (p byRSS) Len() int {
 	return len(p)
@@ -61,7 +63,7 @@ func (p byCPU) Less(i, j int) bool {
 
 // dockerSnapshot containes process list and cpu usage for some docker container
 type dockerSnapshot struct {
-	processes []customProc
+	processes []Process
 	cpuStat   uint64
 }
 
@@ -72,8 +74,8 @@ type historyEntry map[string]dockerSnapshot
 var history [60]historyEntry
 
 // readCgroup reads and parses /proc/{pid}/cgroup file
-func readCgroup(pid uint64, procPath string) (string, error) {
-	cgroupPath := fmt.Sprintf("%s/%d/cgroup", procPath, pid)
+func readCgroup(pid, procPath string) (string, error) {
+	cgroupPath := fmt.Sprintf("%s/%s/cgroup", procPath, pid)
 	dataBytes, err := ioutil.ReadFile(cgroupPath)
 	if err != nil {
 		return "/", err
@@ -95,7 +97,7 @@ func readCgroup(pid uint64, procPath string) (string, error) {
 }
 
 // getProcesses returns list of processes that are in any cgroup
-func getProcesses(rootPath string) ([]customProc, error) {
+func getProcesses(rootPath string) ([]Process, error) {
 	path := filepath.Join(rootPath, "/proc/")
 	d, err := os.Open(path)
 	if err != nil {
@@ -103,7 +105,7 @@ func getProcesses(rootPath string) ([]customProc, error) {
 	}
 	defer d.Close()
 
-	procs := make([]customProc, 0, 50)
+	procs := make([]Process, 0, 50)
 	for {
 		fis, err := d.Readdir(10)
 		if err == io.EOF {
@@ -127,20 +129,33 @@ func getProcesses(rootPath string) ([]customProc, error) {
 
 			// From this point forward, any errors we just ignore, because
 			// it might simply be that the process doesn't exist anymore.
-			pid, err := strconv.ParseUint(name, 10, 64)
-
+			_, err := strconv.ParseUint(name, 10, 64)
 			if err == nil {
+				pid := name
 				cgroup, err := readCgroup(pid, path)
 				if err != nil {
 					continue
 				}
+				var stat *linuxproc.ProcessStat
+				var status *linuxproc.ProcessStatus
+				var cmdline string
 				if cgroup != "/" {
-					p, err := linuxproc.ReadProcess(pid, path)
-					if err != nil {
+					p := Process{}
+					if stat, err = linuxproc.ReadProcessStat(filepath.Join(path, pid, "stat")); err != nil {
 						continue
 					}
+					if status, err = linuxproc.ReadProcessStatus(filepath.Join(path, pid, "status")); err != nil {
+						continue
+					}
+					if cmdline, err = linuxproc.ReadProcessCmdline(filepath.Join(path, pid, "cmdline")); err != nil {
+						continue
+					}
+					p.Cmdline = cmdline
+					p.Cgroup = cgroup
+					p.Stat = *stat
+					p.Status = *status
 					if p.Cmdline != "" && p.Status.VmRSS > 0 {
-						procs = append(procs, customProc{*p, 0, cgroup})
+						procs = append(procs, p)
 					}
 				}
 			}
@@ -173,7 +188,7 @@ func getCPUTotalUsage(dockerID string) (uint64, error) {
 
 // findProc searches for given pid in list of processes and returns
 // its process if found
-func findProc(pid uint64, procs []customProc) *customProc {
+func findProc(pid uint64, procs []Process) *Process {
 	for _, p := range procs {
 		if p.Status.Pid == pid {
 			return &p
@@ -182,9 +197,9 @@ func findProc(pid uint64, procs []customProc) *customProc {
 	return nil
 }
 
-// getCgroups collects all possible cgroups found in []customProc
-func getCgroupsProcs(procs []customProc) map[string][]customProc {
-	cgroupsMap := make(map[string][]customProc, 0)
+// getCgroups collects all possible cgroups found in []Process
+func getCgroupsProcs(procs []Process) map[string][]Process {
+	cgroupsMap := make(map[string][]Process, 0)
 	for _, p := range procs {
 		cgroupsMap[p.Cgroup] = append(cgroupsMap[p.Cgroup], p)
 	}
@@ -192,7 +207,7 @@ func getCgroupsProcs(procs []customProc) map[string][]customProc {
 }
 
 // getLastData returns latest data from history with added calculated CPU usage
-func getLastData(dockerID string) ([]customProc, error) {
+func getLastData(dockerID string) ([]Process, error) {
 	last := len(history) - 1
 	first := last
 	for i, e := range history {
@@ -203,7 +218,7 @@ func getLastData(dockerID string) ([]customProc, error) {
 	}
 	entry1 := history[first][dockerID]
 	entry2 := history[last][dockerID]
-	var procs []customProc
+	var procs []Process
 	for _, p2 := range entry2.processes {
 		p1 := findProc(p2.Status.Pid, entry1.processes)
 		if p1 != nil {
@@ -219,7 +234,7 @@ func getLastData(dockerID string) ([]customProc, error) {
 }
 
 // getTopCPU returns `limit` entries with top CPU usage
-func getTopCPU(dockerID string, limit int) ([]customProc, error) {
+func getTopCPU(dockerID string, limit int) ([]Process, error) {
 	procs, err := getLastData(dockerID)
 	if err != nil {
 		return nil, err
@@ -228,7 +243,7 @@ func getTopCPU(dockerID string, limit int) ([]customProc, error) {
 	if limit > len(procs) {
 		limit = len(procs)
 	}
-	var result []customProc
+	var result []Process
 	for _, p := range procs[:limit] {
 		result = append(result, p)
 		//fmt.Printf("%f%% CPU %s\n", p.CPUUsage, p.Cmdline)
@@ -237,7 +252,7 @@ func getTopCPU(dockerID string, limit int) ([]customProc, error) {
 }
 
 // getTopMem returns `limit` entries with top VmRSS usage
-func getTopMem(dockerID string, limit int) ([]customProc, error) {
+func getTopMem(dockerID string, limit int) ([]Process, error) {
 	procs, err := getLastData(dockerID)
 	if err != nil {
 		return nil, err
@@ -246,7 +261,7 @@ func getTopMem(dockerID string, limit int) ([]customProc, error) {
 	if limit > len(procs) {
 		limit = len(procs)
 	}
-	var result []customProc
+	var result []Process
 	for _, p := range procs[:limit] {
 		result = append(result, p)
 		//fmt.Printf("%dKb %s\n", p.Status.VmRSS, p.Cmdline)
@@ -268,7 +283,7 @@ func httpHandler(res http.ResponseWriter, req *http.Request) {
 		limit = 5
 	}
 	dockerID := "/" + m[1]
-	var result []customProc
+	var result []Process
 	switch m[2] {
 	case "cpu":
 		result, err = getTopCPU(dockerID, int(limit))
