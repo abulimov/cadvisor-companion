@@ -18,7 +18,7 @@ import (
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
 
-var version = "0.0.1"
+var version = "0.0.2"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -31,8 +31,8 @@ type Process struct {
 	Status   linuxproc.ProcessStatus `json:"status"`
 	Stat     linuxproc.ProcessStat   `json:"stat"`
 	Cmdline  string                  `json:"cmdline"`
-	CPUUsage float64
-	Cgroup   string
+	CPUUsage float64                 `json:"cpuusage"`
+	Cgroup   string                  `json:"cgroup"`
 }
 
 // byCPU helps us sort array of Process by CPUUsage
@@ -219,6 +219,7 @@ func getLastData(dockerID string) ([]Process, error) {
 	entry1 := history[first][dockerID]
 	entry2 := history[last][dockerID]
 	var procs []Process
+	totalUsage := float64(0)
 	for _, p2 := range entry2.processes {
 		p1 := findProc(p2.Status.Pid, entry1.processes)
 		if p1 != nil {
@@ -226,9 +227,16 @@ func getLastData(dockerID string) ([]Process, error) {
 			system := int64(p2.Stat.Stime-p1.Stat.Stime) + (p2.Stat.Cstime - p1.Stat.Cstime)
 			percent := (float64(user+system) / float64(entry2.cpuStat-entry1.cpuStat)) * 100
 			p2.CPUUsage = percent
+			totalUsage += percent
 			procs = append(procs, p2)
 		}
 
+	}
+	if totalUsage > 100 {
+		scale := 100.0 / totalUsage
+		for i, p := range procs {
+			procs[i].CPUUsage = scale * p.CPUUsage
+		}
 	}
 	return procs, nil
 }
