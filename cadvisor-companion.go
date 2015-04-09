@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -75,7 +76,7 @@ func readCgroup(pid uint64, procPath string) (string, error) {
 	cgroupPath := fmt.Sprintf("%s/%d/cgroup", procPath, pid)
 	dataBytes, err := ioutil.ReadFile(cgroupPath)
 	if err != nil {
-		return "", err
+		return "/", err
 	}
 	cgroupString := string(dataBytes)
 	lines := strings.Split(cgroupString, "\n")
@@ -90,30 +91,56 @@ func readCgroup(pid uint64, procPath string) (string, error) {
 			return m[2], nil
 		}
 	}
-	return "", nil
+	return "/", nil
 }
 
-// getProcesses returns list of processes for given dockerID
-func getProcesses(dockerID string) ([]customProc, error) {
-	tasksPath := fmt.Sprintf("/sys/fs/cgroup/cpu/docker/%s/tasks", dockerID)
-	dataBytes, err := ioutil.ReadFile(tasksPath)
+// getProcesses returns list of processes that are in any cgroup
+func getProcesses(rootPath string) ([]customProc, error) {
+	path := filepath.Join(rootPath, "/proc/")
+	d, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
+	defer d.Close()
 
-	tasksString := string(dataBytes)
-	tasks := strings.Split(tasksString, "\n")
-	var procs []customProc
-	for _, t := range tasks {
-		pid, err := strconv.ParseUint(t, 10, 64)
-		if err == nil {
-			p, err := linuxproc.ReadProcess(pid, "/proc/")
-			cgroup, err := readCgroup(pid, "/proc/")
-			if err != nil {
+	procs := make([]customProc, 0, 50)
+	for {
+		fis, err := d.Readdir(10)
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+
+		for _, fi := range fis {
+			// We only care about directories, since all pids are dirs
+			if !fi.IsDir() {
 				continue
 			}
-			if p.Cmdline != "" && p.Status.VmRSS > 0 {
-				procs = append(procs, customProc{*p, 0, cgroup})
+
+			// We only care if the name starts with a numeric
+			name := fi.Name()
+			if name[0] < '0' || name[0] > '9' {
+				continue
+			}
+
+			// From this point forward, any errors we just ignore, because
+			// it might simply be that the process doesn't exist anymore.
+			pid, err := strconv.ParseUint(name, 10, 64)
+
+			if err == nil {
+				p, err := linuxproc.ReadProcess(pid, path)
+				if err != nil {
+					continue
+				}
+				cgroup, err := readCgroup(pid, path)
+				if err != nil {
+					continue
+				}
+				if p.Cmdline != "" && p.Status.VmRSS > 0 && cgroup != "/" {
+					procs = append(procs, customProc{*p, 0, cgroup})
+				}
 			}
 		}
 	}
@@ -122,7 +149,7 @@ func getProcesses(dockerID string) ([]customProc, error) {
 
 // getCPUTotalUsage returns amount of CPU time, used by given docker container
 func getCPUTotalUsage(dockerID string) (uint64, error) {
-	cpuAcctPath := fmt.Sprintf("/sys/fs/cgroup/cpuacct/docker/%s/cpuacct.stat", dockerID)
+	cpuAcctPath := fmt.Sprintf("/sys/fs/cgroup/cpuacct/%s/cpuacct.stat", dockerID)
 	dataBytes, err := ioutil.ReadFile(cpuAcctPath)
 	if err != nil {
 		return 0, nil
@@ -151,6 +178,15 @@ func findProc(pid uint64, procs []customProc) *customProc {
 		}
 	}
 	return nil
+}
+
+// getCgroups collects all possible cgroups found in []customProc
+func getCgroupsProcs(procs []customProc) map[string][]customProc {
+	cgroupsMap := make(map[string][]customProc, 0)
+	for _, p := range procs {
+		cgroupsMap[p.Cgroup] = append(cgroupsMap[p.Cgroup], p)
+	}
+	return cgroupsMap
 }
 
 // getLastData returns latest data from history with added calculated CPU usage
@@ -216,42 +252,9 @@ func getTopMem(dockerID string, limit int) ([]customProc, error) {
 	return result, nil
 }
 
-// getDockerIDs collects all docker ids from cgroups pseudo-filesystem
-func getDockerIDs() ([]string, error) {
-	d, err := os.Open("/sys/fs/cgroup/cpu/docker")
-	if err != nil {
-		return nil, err
-	}
-	defer d.Close()
-
-	results := make([]string, 0, 50)
-	for {
-		fis, err := d.Readdir(10)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		for _, fi := range fis {
-			// We only care about directories, since all pids are dirs
-			if !fi.IsDir() {
-				continue
-			}
-			name := fi.Name()
-			if len(name) > '8' {
-				results = append(results, name)
-			}
-		}
-	}
-
-	return results, nil
-}
-
 // httpHandler handles http requests
 func httpHandler(res http.ResponseWriter, req *http.Request) {
-	var validPath = regexp.MustCompile("^/([a-zA-Z0-9]+)/(mem|cpu|all)$")
+	var validPath = regexp.MustCompile("^/api/v1.0/([a-zA-Z0-9/]+)/(mem|cpu|all)$")
 	m := validPath.FindStringSubmatch(req.URL.Path)
 	if m == nil {
 		http.NotFound(res, req)
@@ -262,7 +265,7 @@ func httpHandler(res http.ResponseWriter, req *http.Request) {
 	if err != nil || limit < 1 {
 		limit = 5
 	}
-	dockerID := m[1]
+	dockerID := "/" + m[1]
 	var result []customProc
 	switch m[2] {
 	case "cpu":
@@ -283,19 +286,16 @@ func httpHandler(res http.ResponseWriter, req *http.Request) {
 	io.WriteString(res, string(jsonResult))
 }
 
-// collectData scrapes procs data for all docker containers
-// every second, and sends through channel to getData()
-func collectData() {
-	dockerIDs, err := getDockerIDs()
-	if err != nil {
-		fmt.Println(err)
-	}
+// collectData scrapes procs data for all docker containers every second
+// and keeps it in global history var
+func collectData(rootPath string) {
 	for {
 		entry := make(historyEntry)
-		for _, id := range dockerIDs {
-			res, _ := getProcesses(id)
-			cpu, _ := getCPUTotalUsage(id)
-			entry[id] = dockerSnapshot{res, cpu}
+		res, _ := getProcesses(rootPath)
+		cgroups := getCgroupsProcs(res)
+		for cg, procs := range cgroups {
+			cpu, _ := getCPUTotalUsage(cg)
+			entry[cg] = dockerSnapshot{procs, cpu}
 		}
 		for i, v := range history[1:] {
 			history[i] = v
@@ -303,6 +303,18 @@ func collectData() {
 		history[59] = entry
 		time.Sleep(time.Second)
 	}
+}
+
+func getRootPath() string {
+	dir, err := os.Stat("/rootfs")
+	if err != nil {
+		return "/"
+	}
+	// check if the /rootfs is indeed a directory or not
+	if !dir.IsDir() {
+		return "/"
+	}
+	return "/rootfs"
 }
 
 func main() {
@@ -313,8 +325,14 @@ func main() {
 		os.Exit(0)
 	}
 
-	go collectData()
-	//go processData()
+	// rootPath is where our /proc is mounted.
+	// When we are in docker, host's /proc should be mounted
+	// at /rootfs/proc, so rootPath is /rootfs
+	rootPath := getRootPath()
+
+	// start collecting data
+	go collectData(rootPath)
+
 	addr := fmt.Sprintf("%s:%d", *argIP, *argPort)
 	fmt.Printf("Starting cAdvisor-companion version: %q on port %d\n", version, *argPort)
 	http.HandleFunc("/", httpHandler)
