@@ -69,6 +69,29 @@ type historyEntry map[string]dockerSnapshot
 // history holds RRD-like array of last 60 history entries
 var history [60]historyEntry
 
+// readCgroup reads and parses /proc/{pid}/cgroup file
+func readCgroup(pid uint64, procPath string) (string, error) {
+	cgroupPath := fmt.Sprintf("%s/%d/cgroup", procPath, pid)
+	dataBytes, err := ioutil.ReadFile(cgroupPath)
+	if err != nil {
+		return "", err
+	}
+	cgroupString := string(dataBytes)
+	lines := strings.Split(cgroupString, "\n")
+	var validLine = regexp.MustCompile("^[0-9]+:([a-z,]+):([a-z0-9/]+)$")
+	for _, l := range lines {
+		m := validLine.FindStringSubmatch(l)
+		if m == nil {
+			continue
+		}
+		// we care only about cpu cgroup
+		if strings.Contains(m[1], "cpu") {
+			return m[2], nil
+		}
+	}
+	return "", nil
+}
+
 // getProcesses returns list of processes for given dockerID
 func getProcesses(dockerID string) ([]linuxproc.Process, error) {
 	tasksPath := fmt.Sprintf("/sys/fs/cgroup/cpu/docker/%s/tasks", dockerID)
@@ -84,6 +107,8 @@ func getProcesses(dockerID string) ([]linuxproc.Process, error) {
 		pid, err := strconv.ParseUint(t, 10, 64)
 		if err == nil {
 			p, err := linuxproc.ReadProcess(pid, "/proc/")
+			cgroup, err := readCgroup(pid, "/proc/")
+			fmt.Println(cgroup)
 			if err != nil {
 				continue
 			}
