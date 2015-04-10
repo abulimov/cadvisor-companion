@@ -18,7 +18,7 @@ import (
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
 
-var version = "0.0.3"
+var version = "0.0.4"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -169,8 +169,8 @@ func getProcesses(rootPath string) ([]Process, error) {
 func getCPUTotalUsage(procs []Process) int64 {
 	totalUsage := int64(0)
 	for _, p := range procs {
-		user := int64(p.Stat.Utime) + p.Stat.Cutime
-		system := int64(p.Stat.Stime) + p.Stat.Cstime
+		user := int64(p.Stat.Utime)
+		system := int64(p.Stat.Stime)
 		totalUsage += user + system
 	}
 	return totalUsage
@@ -214,8 +214,8 @@ func getLastData(dockerID string) ([]Process, error) {
 	for _, p2 := range entry2 {
 		p1 := findProc(p2.Status.Pid, entry1)
 		if p1 != nil {
-			user := int64(p2.Stat.Utime-p1.Stat.Utime) + (p2.Stat.Cutime - p1.Stat.Cutime)
-			system := int64(p2.Stat.Stime-p1.Stat.Stime) + (p2.Stat.Cstime - p1.Stat.Cstime)
+			user := int64(p2.Stat.Utime - p1.Stat.Utime)
+			system := int64(p2.Stat.Stime - p1.Stat.Stime)
 			percent := (float64(user+system) / float64(cpu2-cpu1)) * 100
 			p2.CPUUsage = percent
 			procs = append(procs, p2)
