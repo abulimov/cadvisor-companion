@@ -1,0 +1,41 @@
+Name:	cadvisor-compan
+State:	S (sleeping)
+Tgid:	6930
+Ngid:	6930
+Pid:	6930
+PPid:	3458
+TracerPid:	0
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+FDSize:	64
+Groups:	10 
+VmPeak:	   57152 kB
+VmSize:	   57152 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	   54160 kB
+VmRSS:	   53984 kB
+VmData:	   52456 kB
+VmStk:	     136 kB
+VmExe:	    2128 kB
+VmLib:	       0 kB
+VmPTE:	     128 kB
+VmSwap:	     200 kB
+Threads:	4
+SigQ:	0/192630
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000000000000
+SigCgt:	fffffffe7fc1feff
+CapInh:	00000000a80425fb
+CapPrm:	00000000a80425fb
+CapEff:	00000000a80425fb
+CapBnd:	00000000a80425fb
+Seccomp:	0
+Cpus_allowed:	0000ffff
+Cpus_allowed_list:	0-15
+Mems_allowed:	00000000,00000002
+Mems_allowed_list:	1
+voluntary_ctxt_switches:	8441
+nonvoluntary_ctxt_switches:	21050

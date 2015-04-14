@@ -1,0 +1,41 @@
+Name:	runsvdir
+State:	S (sleeping)
+Tgid:	8736
+Ngid:	0
+Pid:	8736
+PPid:	8446
+TracerPid:	0
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+FDSize:	64
+Groups:	
+VmPeak:	     192 kB
+VmSize:	     188 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	      32 kB
+VmRSS:	      32 kB
+VmData:	      32 kB
+VmStk:	     136 kB
+VmExe:	      16 kB
+VmLib:	       0 kB
+VmPTE:	      12 kB
+VmSwap:	       0 kB
+Threads:	1
+SigQ:	0/192630
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000010000
+SigIgn:	0000000001001000
+SigCgt:	0000000000004001
+CapInh:	00000000a80435fb
+CapPrm:	00000000a80435fb
+CapEff:	00000000a80435fb
+CapBnd:	00000000a80435fb
+Seccomp:	0
+Cpus_allowed:	0000ffff
+Cpus_allowed_list:	0-15
+Mems_allowed:	00000000,00000002
+Mems_allowed_list:	1
+voluntary_ctxt_switches:	1624248
+nonvoluntary_ctxt_switches:	16796

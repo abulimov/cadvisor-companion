@@ -59,16 +59,16 @@ func (p ByCPU) Less(i, j int) bool {
 	return p[i].RelativeCPUUsage < p[j].RelativeCPUUsage
 }
 
-// readProcessCgroup reads and parses /proc/{pid}/cgroup file
-func readProcessCgroup(pid, procPath string) (string, error) {
-	cgroupPath := fmt.Sprintf("%s/%s/cgroup", procPath, pid)
+// ReadProcessCgroup reads and parses /proc/{pid}/cgroup file
+func ReadProcessCgroup(path string) (string, error) {
+	cgroupPath := fmt.Sprintf(path)
 	dataBytes, err := ioutil.ReadFile(cgroupPath)
 	if err != nil {
 		return "/", err
 	}
 	cgroupString := string(dataBytes)
 	lines := strings.Split(cgroupString, "\n")
-	var validLine = regexp.MustCompile("^[0-9]+:([a-z,]+):([a-z0-9/]+)$")
+	var validLine = regexp.MustCompile("^[0-9]+:([a-z,]+):([a-z0-9./]+)$")
 	for _, l := range lines {
 		m := validLine.FindStringSubmatch(l)
 		if m == nil {
@@ -118,7 +118,7 @@ func GetProcesses(rootPath string) (List, error) {
 			_, err := strconv.ParseUint(name, 10, 64)
 			if err == nil {
 				pid := name
-				cgroup, err := readProcessCgroup(pid, path)
+				cgroup, err := ReadProcessCgroup(filepath.Join(path, pid, "cgroup"))
 				if err != nil {
 					continue
 				}

@@ -1,0 +1,41 @@
+Name:	cron
+State:	S (sleeping)
+Tgid:	2309
+Ngid:	0
+Pid:	2309
+PPid:	1
+TracerPid:	0
+Uid:	0	0	0	0
+Gid:	0	0	0	0
+FDSize:	64
+Groups:	0 
+VmPeak:	   23680 kB
+VmSize:	   23656 kB
+VmLck:	       0 kB
+VmPin:	       0 kB
+VmHWM:	     992 kB
+VmRSS:	     988 kB
+VmData:	     260 kB
+VmStk:	     136 kB
+VmExe:	      40 kB
+VmLib:	    2664 kB
+VmPTE:	      68 kB
+VmSwap:	      84 kB
+Threads:	1
+SigQ:	0/192630
+SigPnd:	0000000000000000
+ShdPnd:	0000000000000000
+SigBlk:	0000000000000000
+SigIgn:	0000000000000000
+SigCgt:	0000000000010001
+CapInh:	0000000000000000
+CapPrm:	0000001fffffffff
+CapEff:	0000001fffffffff
+CapBnd:	0000001fffffffff
+Seccomp:	0
+Cpus_allowed:	ffffffff
+Cpus_allowed_list:	0-31
+Mems_allowed:	00000000,00000002
+Mems_allowed_list:	1
+voluntary_ctxt_switches:	230905
+nonvoluntary_ctxt_switches:	7
