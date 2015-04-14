@@ -2,14 +2,12 @@ package main
 
 import (
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"regexp"
-	"sort"
 	"strconv"
 	"time"
 
@@ -23,81 +21,7 @@ var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
 var argPort = flag.Int("port", 8801, "port to listen")
 var versionFlag = flag.Bool("version", false, "print cAdvisor-companion version and exit")
 
-// ProcessSnapshot represents slice of processes in time
-type ProcessSnapshot struct {
-	Timestamp time.Time `json:"timestamp"`
-	Processes proc.List `json:"processes"`
-}
-
-// HistoryEntry containes all ProcessSnapshots for some moment in time
-type HistoryEntry map[string]ProcessSnapshot
-
-// history holds RRD-like array of last 60 history entries
-var history [60]HistoryEntry
-
-// getLastData returns data from history with added relative CPU usage
-// offset (in seconds) lets us get data from the past.
-// interval (in seconds) is used to calculate CPU usage
-func getLastData(containerID string, interval, offset int) (*ProcessSnapshot, error) {
-	if len(history) < offset+interval {
-		return nil, errors.New("Wrong offset and interval combination")
-	}
-	last := len(history) - offset
-	first := last - interval
-	entry1 := history[first][containerID]
-	entry2 := history[last][containerID]
-	var procs proc.List
-	cpu1 := entry1.Processes.GetCPUTotalUsage()
-	cpu2 := entry2.Processes.GetCPUTotalUsage()
-	for _, p2 := range entry2.Processes {
-		p1 := entry1.Processes.FindProc(p2.Status.Pid)
-		if p1 != nil {
-			user := int64(p2.Stat.Utime - p1.Stat.Utime)
-			system := int64(p2.Stat.Stime - p1.Stat.Stime)
-			percent := (float64(user+system) / float64(cpu2-cpu1)) * 100
-			p2.RelativeCPUUsage = percent
-			procs = append(procs, p2)
-		}
-
-	}
-	return &ProcessSnapshot{entry2.Timestamp, procs}, nil
-}
-
-// getTopCPU returns `limit` entries with top CPU usage
-func getTopCPU(containerID string, limit, interval, offset int) (*ProcessSnapshot, error) {
-	entry, err := getLastData(containerID, interval, offset)
-	if err != nil {
-		return nil, err
-	}
-	sort.Sort(sort.Reverse(proc.ByCPU(entry.Processes)))
-	if limit > len(entry.Processes) {
-		limit = len(entry.Processes)
-	}
-	var result ProcessSnapshot
-	result.Timestamp = entry.Timestamp
-	for _, p := range entry.Processes[:limit] {
-		result.Processes = append(result.Processes, p)
-	}
-	return &result, nil
-}
-
-// getTopMem returns `limit` entries with top VmRSS usage
-func getTopMem(containerID string, limit, interval, offset int) (*ProcessSnapshot, error) {
-	entry, err := getLastData(containerID, interval, offset)
-	if err != nil {
-		return nil, err
-	}
-	sort.Sort(sort.Reverse(proc.ByRSS(entry.Processes)))
-	if limit > len(entry.Processes) {
-		limit = len(entry.Processes)
-	}
-	var result ProcessSnapshot
-	result.Timestamp = entry.Timestamp
-	for _, p := range entry.Processes[:limit] {
-		result.Processes = append(result.Processes, p)
-	}
-	return &result, nil
-}
+var history proc.HistoryDB
 
 // apiHandler handles http requests
 func apiHandler(res http.ResponseWriter, req *http.Request) {
@@ -145,8 +69,8 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 		"Content-Type",
 		"text/json",
 	)
-	var result []ProcessSnapshot
-	var ps *ProcessSnapshot
+	var result []proc.Snapshot
+	var ps *proc.Snapshot
 	fail := func(err error) {
 		message := map[string]string{"error": err.Error()}
 		messageJSON, _ := json.Marshal(message)
@@ -159,7 +83,7 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 	switch sortStr {
 	case "cpu":
 		for i := count - 1; i >= 0; i-- {
-			ps, err = getTopCPU(containerID, limit, interval, i*interval+1)
+			ps, err = history.GetTopCPU(containerID, limit, interval, i*interval+1)
 			if err != nil {
 				fail(err)
 				return
@@ -168,7 +92,7 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 		}
 	case "mem":
 		for i := count - 1; i >= 0; i-- {
-			ps, err = getTopMem(containerID, limit, interval, i*interval+1)
+			ps, err = history.GetTopMem(containerID, limit, interval, i*interval+1)
 			if err != nil {
 				fail(err)
 				return
@@ -177,7 +101,7 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 		}
 	case "":
 		for i := count - 1; i >= 0; i-- {
-			ps, err = getLastData(containerID, interval, i*interval+1)
+			ps, err = history.GetLastData(containerID, interval, i*interval+1)
 			if err != nil {
 				fail(err)
 				return
@@ -199,16 +123,12 @@ func collectData(rootPath string) {
 		// group all processes by their cgroups
 		cgroupsProcs := allProcs.GetCgroupsMap()
 
-		entry := make(HistoryEntry)
+		entry := make(proc.HistoryEntry)
 		for e, p := range cgroupsProcs {
-			entry[e] = ProcessSnapshot{timeStamp, p}
+			entry[e] = proc.Snapshot{timeStamp, p}
 		}
+		history.Push(entry)
 
-		// rotate our history
-		for i, v := range history[1:] {
-			history[i] = v
-		}
-		history[len(history)-1] = entry
 		time.Sleep(time.Second)
 	}
 }
