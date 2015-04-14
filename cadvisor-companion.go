@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -38,6 +39,9 @@ var history [60]HistoryEntry
 // offset (in seconds) lets us get data from the past.
 // interval (in seconds) is used to calculate CPU usage
 func getLastData(containerID string, interval, offset int) (*ProcessSnapshot, error) {
+	if len(history) < offset+interval {
+		return nil, errors.New("Wrong offset and interval combination")
+	}
 	last := len(history) - offset
 	first := last - interval
 	entry1 := history[first][containerID]
@@ -143,28 +147,43 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 	)
 	var result []ProcessSnapshot
 	var ps *ProcessSnapshot
+	fail := func(err error) {
+		message := map[string]string{"error": err.Error()}
+		messageJSON, _ := json.Marshal(message)
+		fmt.Printf("Error: %s\n", err.Error())
+		res.WriteHeader(500) // HTTP 500
+		io.WriteString(res, string(messageJSON))
+		return
+	}
 	// case our possible sort parameters
 	switch sortStr {
 	case "cpu":
 		for i := count - 1; i >= 0; i-- {
 			ps, err = getTopCPU(containerID, limit, interval, i*interval+1)
+			if err != nil {
+				fail(err)
+				return
+			}
 			result = append(result, *ps)
 		}
 	case "mem":
 		for i := count - 1; i >= 0; i-- {
 			ps, err = getTopMem(containerID, limit, interval, i*interval+1)
+			if err != nil {
+				fail(err)
+				return
+			}
 			result = append(result, *ps)
 		}
 	case "":
 		for i := count - 1; i >= 0; i-- {
 			ps, err = getLastData(containerID, interval, i*interval+1)
+			if err != nil {
+				fail(err)
+				return
+			}
 			result = append(result, *ps)
 		}
-	}
-	if err != nil {
-		fmt.Println(err)
-		res.WriteHeader(500) // HTTP 500
-		io.WriteString(res, err.Error())
 	}
 	jsonResult, _ := json.Marshal(result)
 	io.WriteString(res, string(jsonResult))
