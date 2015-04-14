@@ -5,17 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"os"
-	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
-	linuxproc "github.com/c9s/goprocinfo/linux"
+	proc "github.com/abulimov/cadvisor-companion/process"
 )
 
 var version = "0.0.5"
@@ -25,53 +22,10 @@ var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
 var argPort = flag.Int("port", 8801, "port to listen")
 var versionFlag = flag.Bool("version", false, "print cAdvisor-companion version and exit")
 
-// Process is our extended linuxproc.Process type
-// with custom cgroup and cpuUsage attributes
-type Process struct {
-	Status  linuxproc.ProcessStatus `json:"status"`
-	Stat    linuxproc.ProcessStat   `json:"stat"`
-	Cmdline string                  `json:"cmdline"`
-	// RelativeCPUUsage is the percent of total CPU time used by container
-	// that was used by this particular process in some time interval.
-	// This value IS NOT traditional %CPU usage, which is the amount
-	// of total available CPU time, used by particular process.
-	// So, if all processes in given container used 10% of available host
-	// resources, RelativeCPUUsage of 90% would mean that this process used
-	// 9% of available host CPU resources.
-	RelativeCPUUsage float64 `json:"relativecpuusage"`
-	Cgroup           string  `json:"cgroup"`
-}
-
-// byCPU helps us sort array of Process by RelativeCPUUsage
-type byCPU []Process
-
-// byRSS helps us sort array of Process by Status.VmRSS
-type byRSS []Process
-
-func (p byRSS) Len() int {
-	return len(p)
-}
-func (p byRSS) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-}
-func (p byRSS) Less(i, j int) bool {
-	return p[i].Status.VmRSS < p[j].Status.VmRSS
-}
-
-func (p byCPU) Len() int {
-	return len(p)
-}
-func (p byCPU) Swap(i, j int) {
-	p[i], p[j] = p[j], p[i]
-}
-func (p byCPU) Less(i, j int) bool {
-	return p[i].RelativeCPUUsage < p[j].RelativeCPUUsage
-}
-
 // ProcessSnapshot represents slice of processes in time
 type ProcessSnapshot struct {
 	Timestamp time.Time `json:"timestamp"`
-	Processes []Process `json:"processes"`
+	Processes proc.List `json:"processes"`
 }
 
 // HistoryEntry containes all ProcessSnapshots for some moment in time
@@ -79,129 +33,6 @@ type HistoryEntry map[string]ProcessSnapshot
 
 // history holds RRD-like array of last 60 history entries
 var history [60]HistoryEntry
-
-// readCgroup reads and parses /proc/{pid}/cgroup file
-func readCgroup(pid, procPath string) (string, error) {
-	cgroupPath := fmt.Sprintf("%s/%s/cgroup", procPath, pid)
-	dataBytes, err := ioutil.ReadFile(cgroupPath)
-	if err != nil {
-		return "/", err
-	}
-	cgroupString := string(dataBytes)
-	lines := strings.Split(cgroupString, "\n")
-	var validLine = regexp.MustCompile("^[0-9]+:([a-z,]+):([a-z0-9/]+)$")
-	for _, l := range lines {
-		m := validLine.FindStringSubmatch(l)
-		if m == nil {
-			continue
-		}
-		// we care only about cpu cgroup
-		if strings.Contains(m[1], "cpu") {
-			return m[2], nil
-		}
-	}
-	return "/", nil
-}
-
-// getProcesses returns list of processes that are in any cgroup
-func getProcesses(rootPath string) ([]Process, error) {
-	path := filepath.Join(rootPath, "/proc/")
-	d, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer d.Close()
-
-	procs := make([]Process, 0, 50)
-	for {
-		fis, err := d.Readdir(10)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, err
-		}
-
-		for _, fi := range fis {
-			// We only care about directories, since all pids are dirs
-			if !fi.IsDir() {
-				continue
-			}
-
-			// We only care if the name starts with a numeric
-			name := fi.Name()
-			if name[0] < '0' || name[0] > '9' {
-				continue
-			}
-
-			// From this point forward, any errors we just ignore, because
-			// it might simply be that the process doesn't exist anymore.
-			_, err := strconv.ParseUint(name, 10, 64)
-			if err == nil {
-				pid := name
-				cgroup, err := readCgroup(pid, path)
-				if err != nil {
-					continue
-				}
-				var stat *linuxproc.ProcessStat
-				var status *linuxproc.ProcessStatus
-				var cmdline string
-				// we collect only processes from containers
-				if cgroup != "/" {
-					p := Process{}
-					if stat, err = linuxproc.ReadProcessStat(filepath.Join(path, pid, "stat")); err != nil {
-						continue
-					}
-					if status, err = linuxproc.ReadProcessStatus(filepath.Join(path, pid, "status")); err != nil {
-						continue
-					}
-					if cmdline, err = linuxproc.ReadProcessCmdline(filepath.Join(path, pid, "cmdline")); err != nil {
-						continue
-					}
-					p.Cmdline = cmdline
-					p.Cgroup = cgroup
-					p.Stat = *stat
-					p.Status = *status
-					if p.Cmdline != "" && p.Status.VmRSS > 0 {
-						procs = append(procs, p)
-					}
-				}
-			}
-		}
-	}
-	return procs, nil
-}
-
-// getCPUTotalUsage returns total amount of CPU time used by list of given procs
-func getCPUTotalUsage(procs []Process) int64 {
-	totalUsage := int64(0)
-	for _, p := range procs {
-		user := int64(p.Stat.Utime)
-		system := int64(p.Stat.Stime)
-		totalUsage += user + system
-	}
-	return totalUsage
-}
-
-// findProc searches for given pid in list of processes and returns
-// its process if found
-func findProc(pid uint64, procs []Process) *Process {
-	for _, p := range procs {
-		if p.Status.Pid == pid {
-			return &p
-		}
-	}
-	return nil
-}
-
-// getCgroups collects all possible cgroups found in []Process
-func getCgroupsProcs(procs []Process) map[string][]Process {
-	cgroupsMap := make(map[string][]Process, 0)
-	for _, p := range procs {
-		cgroupsMap[p.Cgroup] = append(cgroupsMap[p.Cgroup], p)
-	}
-	return cgroupsMap
-}
 
 // getLastData returns data from history with added relative CPU usage
 // offset (in seconds) lets us get data from the past.
@@ -211,11 +42,11 @@ func getLastData(containerID string, interval, offset int) (*ProcessSnapshot, er
 	first := last - interval
 	entry1 := history[first][containerID]
 	entry2 := history[last][containerID]
-	var procs []Process
-	cpu1 := getCPUTotalUsage(entry1.Processes)
-	cpu2 := getCPUTotalUsage(entry2.Processes)
+	var procs proc.List
+	cpu1 := entry1.Processes.GetCPUTotalUsage()
+	cpu2 := entry2.Processes.GetCPUTotalUsage()
 	for _, p2 := range entry2.Processes {
-		p1 := findProc(p2.Status.Pid, entry1.Processes)
+		p1 := entry1.Processes.FindProc(p2.Status.Pid)
 		if p1 != nil {
 			user := int64(p2.Stat.Utime - p1.Stat.Utime)
 			system := int64(p2.Stat.Stime - p1.Stat.Stime)
@@ -234,7 +65,7 @@ func getTopCPU(containerID string, limit, interval, offset int) (*ProcessSnapsho
 	if err != nil {
 		return nil, err
 	}
-	sort.Sort(sort.Reverse(byCPU(entry.Processes)))
+	sort.Sort(sort.Reverse(proc.ByCPU(entry.Processes)))
 	if limit > len(entry.Processes) {
 		limit = len(entry.Processes)
 	}
@@ -252,7 +83,7 @@ func getTopMem(containerID string, limit, interval, offset int) (*ProcessSnapsho
 	if err != nil {
 		return nil, err
 	}
-	sort.Sort(sort.Reverse(byRSS(entry.Processes)))
+	sort.Sort(sort.Reverse(proc.ByRSS(entry.Processes)))
 	if limit > len(entry.Processes) {
 		limit = len(entry.Processes)
 	}
@@ -345,9 +176,9 @@ func collectData(rootPath string) {
 	for {
 		timeStamp := time.Now()
 		// get all processes without cgroup grouping
-		allProcs, _ := getProcesses(rootPath)
+		allProcs, _ := proc.GetProcesses(rootPath)
 		// group all processes by their cgroups
-		cgroupsProcs := getCgroupsProcs(allProcs)
+		cgroupsProcs := allProcs.GetCgroupsMap()
 
 		entry := make(HistoryEntry)
 		for e, p := range cgroupsProcs {
