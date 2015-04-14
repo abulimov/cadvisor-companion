@@ -18,7 +18,7 @@ import (
 	linuxproc "github.com/c9s/goprocinfo/linux"
 )
 
-var version = "0.0.4"
+var version = "0.0.5"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -31,18 +31,18 @@ type Process struct {
 	Status  linuxproc.ProcessStatus `json:"status"`
 	Stat    linuxproc.ProcessStat   `json:"stat"`
 	Cmdline string                  `json:"cmdline"`
-	// CPUUsage is the percent of total CPU time used by container
-	// that was used by this particular process in 1 minute.
+	// RelativeCPUUsage is the percent of total CPU time used by container
+	// that was used by this particular process in some time interval.
 	// This value IS NOT traditional %CPU usage, which is the amount
 	// of total available CPU time, used by particular process.
 	// So, if all processes in given container used 10% of available host
-	// resources, CPUUsage of 90% would mean that this process used
+	// resources, RelativeCPUUsage of 90% would mean that this process used
 	// 9% of available host CPU resources.
-	CPUUsage float64 `json:"cpuusage"`
-	Cgroup   string  `json:"cgroup"`
+	RelativeCPUUsage float64 `json:"relativecpuusage"`
+	Cgroup           string  `json:"cgroup"`
 }
 
-// byCPU helps us sort array of Process by CPUUsage
+// byCPU helps us sort array of Process by RelativeCPUUsage
 type byCPU []Process
 
 // byRSS helps us sort array of Process by Status.VmRSS
@@ -65,14 +65,20 @@ func (p byCPU) Swap(i, j int) {
 	p[i], p[j] = p[j], p[i]
 }
 func (p byCPU) Less(i, j int) bool {
-	return p[i].CPUUsage < p[j].CPUUsage
+	return p[i].RelativeCPUUsage < p[j].RelativeCPUUsage
 }
 
-// historyEntry containes all dockerSnapshots for some moment in time
-type historyEntry map[string][]Process
+// ProcessSnapshot represents slice of processes in time
+type ProcessSnapshot struct {
+	Timestamp time.Time `json:"timestamp"`
+	Processes []Process `json:"processes"`
+}
+
+// HistoryEntry containes all ProcessSnapshots for some moment in time
+type HistoryEntry map[string]ProcessSnapshot
 
 // history holds RRD-like array of last 60 history entries
-var history [60]historyEntry
+var history [60]HistoryEntry
 
 // readCgroup reads and parses /proc/{pid}/cgroup file
 func readCgroup(pid, procPath string) (string, error) {
@@ -140,6 +146,7 @@ func getProcesses(rootPath string) ([]Process, error) {
 				var stat *linuxproc.ProcessStat
 				var status *linuxproc.ProcessStatus
 				var cmdline string
+				// we collect only processes from containers
 				if cgroup != "/" {
 					p := Process{}
 					if stat, err = linuxproc.ReadProcessStat(filepath.Join(path, pid, "stat")); err != nil {
@@ -165,7 +172,7 @@ func getProcesses(rootPath string) ([]Process, error) {
 	return procs, nil
 }
 
-// getCPUTotalUsage returns amount of CPU time used by list of give procs
+// getCPUTotalUsage returns total amount of CPU time used by list of given procs
 func getCPUTotalUsage(procs []Process) int64 {
 	totalUsage := int64(0)
 	for _, p := range procs {
@@ -196,115 +203,162 @@ func getCgroupsProcs(procs []Process) map[string][]Process {
 	return cgroupsMap
 }
 
-// getLastData returns latest data from history with added calculated CPU usage
-func getLastData(dockerID string) ([]Process, error) {
-	last := len(history) - 1
-	first := last
-	for i, e := range history {
-		if len(e[dockerID]) > 0 {
-			first = i
-			break
-		}
-	}
-	entry1 := history[first][dockerID]
-	entry2 := history[last][dockerID]
+// getLastData returns data from history with added relative CPU usage
+// offset (in seconds) lets us get data from the past.
+// interval (in seconds) is used to calculate CPU usage
+func getLastData(containerID string, interval, offset int) (*ProcessSnapshot, error) {
+	last := len(history) - offset
+	first := last - interval
+	entry1 := history[first][containerID]
+	entry2 := history[last][containerID]
 	var procs []Process
-	cpu1 := getCPUTotalUsage(entry1)
-	cpu2 := getCPUTotalUsage(entry2)
-	for _, p2 := range entry2 {
-		p1 := findProc(p2.Status.Pid, entry1)
+	cpu1 := getCPUTotalUsage(entry1.Processes)
+	cpu2 := getCPUTotalUsage(entry2.Processes)
+	for _, p2 := range entry2.Processes {
+		p1 := findProc(p2.Status.Pid, entry1.Processes)
 		if p1 != nil {
 			user := int64(p2.Stat.Utime - p1.Stat.Utime)
 			system := int64(p2.Stat.Stime - p1.Stat.Stime)
 			percent := (float64(user+system) / float64(cpu2-cpu1)) * 100
-			p2.CPUUsage = percent
+			p2.RelativeCPUUsage = percent
 			procs = append(procs, p2)
 		}
 
 	}
-	return procs, nil
+	return &ProcessSnapshot{entry2.Timestamp, procs}, nil
 }
 
 // getTopCPU returns `limit` entries with top CPU usage
-func getTopCPU(dockerID string, limit int) ([]Process, error) {
-	procs, err := getLastData(dockerID)
+func getTopCPU(containerID string, limit, interval, offset int) (*ProcessSnapshot, error) {
+	entry, err := getLastData(containerID, interval, offset)
 	if err != nil {
 		return nil, err
 	}
-	sort.Sort(sort.Reverse(byCPU(procs)))
-	if limit > len(procs) {
-		limit = len(procs)
+	sort.Sort(sort.Reverse(byCPU(entry.Processes)))
+	if limit > len(entry.Processes) {
+		limit = len(entry.Processes)
 	}
-	var result []Process
-	for _, p := range procs[:limit] {
-		result = append(result, p)
-		//fmt.Printf("%f%% CPU %s\n", p.CPUUsage, p.Cmdline)
+	var result ProcessSnapshot
+	result.Timestamp = entry.Timestamp
+	for _, p := range entry.Processes[:limit] {
+		result.Processes = append(result.Processes, p)
 	}
-	return result, nil
+	return &result, nil
 }
 
 // getTopMem returns `limit` entries with top VmRSS usage
-func getTopMem(dockerID string, limit int) ([]Process, error) {
-	procs, err := getLastData(dockerID)
+func getTopMem(containerID string, limit, interval, offset int) (*ProcessSnapshot, error) {
+	entry, err := getLastData(containerID, interval, offset)
 	if err != nil {
 		return nil, err
 	}
-	sort.Sort(sort.Reverse(byRSS(procs)))
-	if limit > len(procs) {
-		limit = len(procs)
+	sort.Sort(sort.Reverse(byRSS(entry.Processes)))
+	if limit > len(entry.Processes) {
+		limit = len(entry.Processes)
 	}
-	var result []Process
-	for _, p := range procs[:limit] {
-		result = append(result, p)
-		//fmt.Printf("%dKb %s\n", p.Status.VmRSS, p.Cmdline)
+	var result ProcessSnapshot
+	result.Timestamp = entry.Timestamp
+	for _, p := range entry.Processes[:limit] {
+		result.Processes = append(result.Processes, p)
 	}
-	return result, nil
+	return &result, nil
 }
 
-// httpHandler handles http requests
-func httpHandler(res http.ResponseWriter, req *http.Request) {
-	var validPath = regexp.MustCompile("^/api/v1.0/([a-zA-Z0-9/]+)/(mem|cpu|all)$")
+// apiHandler handles http requests
+func apiHandler(res http.ResponseWriter, req *http.Request) {
+	var validPath = regexp.MustCompile("^/api/v1.0/([a-zA-Z0-9/]+)/processes$")
+
+	// validate requested URL
 	m := validPath.FindStringSubmatch(req.URL.Path)
 	if m == nil {
 		http.NotFound(res, req)
 		return
 	}
+
+	// process get parameters
+
+	// sortStr is used to get top sorted procs
+	sortStr := req.URL.Query().Get("sort")
+
+	// limit is used to limit top sorted procs
 	limitStr := req.URL.Query().Get("limit")
-	limit, err := strconv.ParseInt(limitStr, 10, 0)
+	limit, err := strconv.Atoi(limitStr)
 	if err != nil || limit < 1 {
 		limit = 5
 	}
-	dockerID := "/" + m[1]
-	var result []Process
-	switch m[2] {
-	case "cpu":
-		result, err = getTopCPU(dockerID, int(limit))
-	case "mem":
-		result, err = getTopMem(dockerID, int(limit))
-	case "all":
-		result, err = getLastData(dockerID)
+
+	// interval is the interval we use to calculate CPU usage
+	// and to iterate back to the past
+	intervalStr := req.URL.Query().Get("interval")
+	interval, err := strconv.Atoi(intervalStr)
+	if err != nil || interval < 1 {
+		interval = 1
 	}
-	if err != nil {
-		fmt.Println(err)
+
+	// count is the count of resulting points in time
+	countStr := req.URL.Query().Get("count")
+	count, err := strconv.Atoi(countStr)
+	if err != nil || count < 1 {
+		count = 1
 	}
-	jsonResult, _ := json.Marshal(result)
+
+	// containerID is the name of our container/cgroup
+	containerID := "/" + m[1]
+
+	// set response headers
 	res.Header().Set(
 		"Content-Type",
 		"text/json",
 	)
+	var result []ProcessSnapshot
+	var ps *ProcessSnapshot
+	// case our possible sort parameters
+	switch sortStr {
+	case "cpu":
+		for i := count - 1; i >= 0; i-- {
+			ps, err = getTopCPU(containerID, limit, interval, i*interval+1)
+			result = append(result, *ps)
+		}
+	case "mem":
+		for i := count - 1; i >= 0; i-- {
+			ps, err = getTopMem(containerID, limit, interval, i*interval+1)
+			result = append(result, *ps)
+		}
+	case "":
+		for i := count - 1; i >= 0; i-- {
+			ps, err = getLastData(containerID, interval, i*interval+1)
+			result = append(result, *ps)
+		}
+	}
+	if err != nil {
+		fmt.Println(err)
+		res.WriteHeader(500) // HTTP 500
+		io.WriteString(res, err.Error())
+	}
+	jsonResult, _ := json.Marshal(result)
 	io.WriteString(res, string(jsonResult))
 }
 
-// collectData scrapes procs data for all docker containers every second
+// collectData scrapes procs data for all containers every second
 // and keeps it in global history var
 func collectData(rootPath string) {
 	for {
+		timeStamp := time.Now()
+		// get all processes without cgroup grouping
 		allProcs, _ := getProcesses(rootPath)
-		entry := getCgroupsProcs(allProcs)
+		// group all processes by their cgroups
+		cgroupsProcs := getCgroupsProcs(allProcs)
+
+		entry := make(HistoryEntry)
+		for e, p := range cgroupsProcs {
+			entry[e] = ProcessSnapshot{timeStamp, p}
+		}
+
+		// rotate our history
 		for i, v := range history[1:] {
 			history[i] = v
 		}
-		history[59] = entry
+		history[len(history)-1] = entry
 		time.Sleep(time.Second)
 	}
 }
@@ -330,7 +384,7 @@ func main() {
 	}
 
 	// rootPath is where our /proc is mounted.
-	// When we are in docker, host's /proc should be mounted
+	// When we are inside the container, host's /proc should be mounted
 	// at /rootfs/proc, so rootPath is /rootfs
 	rootPath := getRootPath()
 
@@ -339,7 +393,7 @@ func main() {
 
 	addr := fmt.Sprintf("%s:%d", *argIP, *argPort)
 	fmt.Printf("Starting cAdvisor-companion version: %q on port %d\n", version, *argPort)
-	http.HandleFunc("/", httpHandler)
+	http.HandleFunc("/api/", apiHandler)
 	err := http.ListenAndServe(addr, nil)
 	if err != nil {
 		fmt.Println(err)
