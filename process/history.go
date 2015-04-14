@@ -31,7 +31,7 @@ func (history *HistoryDB) Push(entry HistoryEntry) {
 // offset (in seconds) lets us get data from the past.
 // interval (in seconds) is used to calculate CPU usage
 func (history *HistoryDB) GetLastData(containerID string, interval, offset int) (*Snapshot, error) {
-	if len(history) < offset+interval {
+	if len(history) < offset+interval || offset < 1 || interval < 1 {
 		return nil, errors.New("Wrong offset and interval combination")
 	}
 	last := len(history) - offset
