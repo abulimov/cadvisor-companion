@@ -3,11 +3,49 @@
 This tool is a small companion app for the
 [Google's cAdvisor](https://github.com/google/cadvisor).
 
-While cAdvisor "provides container users an understanding
+While cAdvisor
+> provides container users an understanding
 of the resource usage and performance characteristics of
-their running containers", cAdvisor-companion shows
-whats going on inside the containers, by providing
+their running containers
+ - https://github.com/google/cadvisor
+
+cAdvisor-companion shows whats going on inside the containers, by providing
 API to get info about containerized processes.
+
+
+## What is it for?
+
+This tool was created mainly for monitoring events enrichment,
+but can be used for variety of tasks.
+
+I use cAdvisor-companion to add `ps aux --sort [pcpu|rss]`-like output
+to notification events from monitoring, when one of the containers starts to
+use too much CPU or memory.
+
+Other usage example can be implementing cgroup-aware top-like utility.
+
+
+## Why not just use Docker top API?
+
+`docker top` command, as for Docker 1.5, is just a wrapper for calling
+`docker exec container_name ps` for given  container, and has all
+disadvantages of this method.
+
+For example, `ps` is not cgroup-aware, and shows wrong %MEM and %CPU
+usage inside container. For additional information about this problem I recommend reading
+[article by Fabio Kung](http://fabiokung.com/2014/03/13/memory-inside-linux-containers/).
+
+Another reason is security problems with Docker access over network.
+As for Docker 1.5, official documentation tells us that
+>"If you are binding to a TCP port, anyone with access to that port has full Docker access; so it is not advisable on an open network."
+- http://docs.docker.com/articles/basics/
+
+cAdvisor-companion does not pose any security risks, because
+all it needs to collect data is read-only access to hosts `/proc` filesystem.
+
+Also, cAdvisor-companion should work with any cgroup-based container type,
+like LXC or systemd-nspawn.
+
 
 
 ## API v1.0
@@ -121,7 +159,7 @@ Just run `make docker` inside projects directory.
 
 The easiest way to run cAdvisor-companion is using docker container:
 
-    docker run -m 200m \
+    docker run \
     --volume=/:/rootfs:ro \
     --publish=8801:8801 \
     --detach=true \
@@ -130,6 +168,13 @@ The easiest way to run cAdvisor-companion is using docker container:
 
 Alternatively, you can build executable yourself, or even build
 docker container yourself.
+
+If you have built executable yourself, you can run it from the command line.
+Type `./cadvisor-companion`, and the cAdvisor-companion server will stat running
+in foreground listening on port 8801.
+
+You can change this behavior with command line options, use
+`cadvisor-companion -h` to get help.
 
 
 ## License
