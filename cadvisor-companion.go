@@ -79,35 +79,23 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 		io.WriteString(res, string(messageJSON))
 		return
 	}
-	// case our possible sort parameters
-	switch sortStr {
-	case "cpu":
-		for i := count - 1; i >= 0; i-- {
+
+	// get data for all `count` HistoryEntries
+	for i := count - 1; i >= 0; i-- {
+		// case our possible sort parameters
+		switch sortStr {
+		case "cpu":
 			ps, err = history.GetTopCPU(containerID, limit, interval, i*interval+1)
-			if err != nil {
-				fail(err)
-				return
-			}
-			result = append(result, *ps)
-		}
-	case "mem":
-		for i := count - 1; i >= 0; i-- {
+		case "mem":
 			ps, err = history.GetTopMem(containerID, limit, interval, i*interval+1)
-			if err != nil {
-				fail(err)
-				return
-			}
-			result = append(result, *ps)
-		}
-	case "":
-		for i := count - 1; i >= 0; i-- {
+		case "":
 			ps, err = history.GetLastData(containerID, interval, i*interval+1)
-			if err != nil {
-				fail(err)
-				return
-			}
-			result = append(result, *ps)
 		}
+		if err != nil {
+			fail(err)
+			return
+		}
+		result = append(result, *ps)
 	}
 	jsonResult, _ := json.Marshal(result)
 	io.WriteString(res, string(jsonResult))
@@ -125,7 +113,7 @@ func collectData(rootPath string) {
 
 		entry := make(proc.HistoryEntry)
 		for e, p := range cgroupsProcs {
-			entry[e] = proc.Snapshot{timeStamp, p}
+			entry[e] = proc.Snapshot{Timestamp: timeStamp, Processes: p}
 		}
 		history.Push(entry)
 
