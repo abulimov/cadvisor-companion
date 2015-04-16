@@ -1,3 +1,7 @@
+// Copyright 2015 Alexander Bulimov. All rights reserved.
+// Use of this source code is governed by a MIT
+// license that can be found in the LICENSE file.
+
 package main
 
 import (
@@ -14,7 +18,7 @@ import (
 	proc "github.com/abulimov/cadvisor-companion/process"
 )
 
-var version = "0.0.5"
+var version = "0.1.0"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
