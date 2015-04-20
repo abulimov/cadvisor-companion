@@ -66,7 +66,7 @@ func (history *HistoryDB) GetTopCPU(containerID string, limit, interval, offset 
 		return nil, err
 	}
 	sort.Sort(sort.Reverse(ByCPU(entry.Processes)))
-	if limit > len(entry.Processes) {
+	if limit == 0 || limit > len(entry.Processes) {
 		limit = len(entry.Processes)
 	}
 	var result Snapshot
@@ -84,7 +84,7 @@ func (history *HistoryDB) GetTopMem(containerID string, limit, interval, offset 
 		return nil, err
 	}
 	sort.Sort(sort.Reverse(ByRSS(entry.Processes)))
-	if limit > len(entry.Processes) {
+	if limit == 0 || limit > len(entry.Processes) {
 		limit = len(entry.Processes)
 	}
 	var result Snapshot

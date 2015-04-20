@@ -1,3 +1,8 @@
+## v0.1.1 [2015-04-20]
+
+- Removed non-documented default limit for TopCPU and TopMem requests
+- Added example ps-like utility
+
 ## v0.1.0 [2015-04-16]
 
 - First public release

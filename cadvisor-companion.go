@@ -18,7 +18,7 @@ import (
 	proc "github.com/abulimov/cadvisor-companion/process"
 )
 
-var version = "0.1.0"
+var version = "0.1.1"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -46,8 +46,8 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 	// limit is used to limit top sorted procs
 	limitStr := req.URL.Query().Get("limit")
 	limit, err := strconv.Atoi(limitStr)
-	if err != nil || limit < 1 {
-		limit = 5
+	if err != nil || limit < 0 {
+		limit = 0
 	}
 
 	// interval is the interval we use to calculate CPU usage
