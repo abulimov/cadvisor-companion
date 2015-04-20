@@ -22,7 +22,8 @@ I use cAdvisor-companion to add `ps aux --sort [pcpu|rss]`-like output
 to notification events from monitoring, when one of the containers starts to
 use too much CPU or memory.
 
-Other usage example can be implementing cgroup-aware top-like utility.
+Other usage example can be implementing cgroup-aware ps-like or top-like utility,
+demo version of such utility is placed under **examples/ps.py**.
 
 
 ## Why not just use Docker top API?
