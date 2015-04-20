@@ -1,3 +1,7 @@
+## v0.1.2 [2015-04-20]
+
+- Fixed time drift by using time.Tick to collect data
+
 ## v0.1.1 [2015-04-20]
 
 - Removed non-documented default limit for TopCPU and TopMem requests
