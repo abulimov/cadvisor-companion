@@ -48,7 +48,14 @@ def get_machine_data(cadvisor_url):
 
 
 def show_procs(procs, host_data, machine_data, limit):
-    mem_limit = host_data["spec"]["memory"]["limit"] / 1024
+    """Pretty print host procs in ps-like fashion"""
+    mem_limit = host_data["spec"]["memory"]["limit"]
+    mem_limit_host = machine_data["memory_capacity"]
+
+    if mem_limit > mem_limit_host:
+        mem_limit = mem_limit_host
+    mem_limit_kb = mem_limit / 1024
+
     result = ""
     result = "\n%5s %5s %5s %5s %8s %8s %6s %s\n" % (
         "USER", "PID", "%CPU", "%MEM", "VSZ", "RSS", "STAT", "COMMAND")
@@ -64,7 +71,7 @@ def show_procs(procs, host_data, machine_data, limit):
             "user": proc["status"]["RealUid"],
             "pid": proc["stat"]["pid"],
             "cpu": proc["relativecpuusage"],
-            "mem": proc["status"]["VmRSS"] * 100 / mem_limit,
+            "mem": proc["status"]["VmRSS"] * 100 / mem_limit_kb,
             "vsz": proc["status"]["VmSize"],
             "rss": proc["status"]["VmRSS"],
             "state": proc["stat"]["state"],
@@ -101,7 +108,8 @@ if __name__ == "__main__":
     try:
         host_data = get_host_data(args.url, args.name)
         machine_data = get_machine_data(args.url)
-        host_procs = get_host_procs(args.companion_url, host_data["name"], sort_by)
+        host_procs = get_host_procs(args.companion_url,
+                                    host_data["name"], sort_by)
         print(show_procs(host_procs, host_data, machine_data, args.limit))
     except (requests.exceptions.RequestException, ValueError) as e:
         fail(e)
