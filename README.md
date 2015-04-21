@@ -22,6 +22,12 @@ I use cAdvisor-companion to add `ps aux --sort [pcpu|rss]`-like output
 to notification events from monitoring, when one of the containers starts to
 use too much CPU or memory.
 
+My Nagios-compatible plugin **check_cadvisor.py** for checking
+memory and CPU usage inside container is available in
+[my *utils* repo](https://github.com/abulimov/utils/blob/master/nagios/check_cadvisor.py).
+This plugin can use additional cAdvisor-companion url parameter to enrich
+its own output with top mem/CPU-using processes.
+
 Other usage example can be implementing cgroup-aware ps-like or top-like utility,
 demo version of such utility is placed under **examples/ps.py**.
 
