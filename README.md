@@ -1,3 +1,5 @@
+[![Build Status](https://travis-ci.org/abulimov/cadvisor-companion.svg?branch=master)](https://travis-ci.org/abulimov/cadvisor-companion)
+
 # cAdvisor-companion
 
 This tool is a small companion app for the
