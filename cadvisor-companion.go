@@ -18,7 +18,7 @@ import (
 	proc "github.com/abulimov/cadvisor-companion/process"
 )
 
-var version = "0.1.2"
+var version = "0.1.3"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -108,7 +108,7 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 // collectData scrapes procs data for all containers every second
 // and keeps it in global history var
 func collectData(rootPath string) {
-	for range time.Tick(time.Second) {
+	for _ = range time.Tick(time.Second) {
 		timeStamp := time.Now()
 		// get all processes without cgroup grouping
 		allProcs, _ := proc.GetProcesses(rootPath)

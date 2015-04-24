@@ -1,3 +1,9 @@
+## v0.1.3 [2015-04-24]
+
+- Fixed compilation on go < 1.4
+- Updated Makefile
+- Fixed wrong mem_limit calculation in examples/ps.py
+
 ## v0.1.2 [2015-04-20]
 
 - Fixed time drift by using time.Tick to collect data
