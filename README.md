@@ -71,8 +71,11 @@ Where the absolute container name follows the lmctfy naming convention. For exam
 |----------------------|-------------------------------------------|
 | /foo                 | /api/v1.0/foo/processes                  |
 | /docker/2c4dee605d22 | /api/v1.0/docker/2c4dee605d22/processes  |
+| /system.slice/docker-7dc0bad.scope/ | /api/v1.0/system.slice/docker-7dc0bad.scope/processes  |
 
-All Docker containers are listed under `/docker`.
+Docker < 1.6 containers are listed under `/docker`, Docker 1.6 on host
+with systemd places its containers under cgroups like
+`/system.slice/docker-{id}.scope`.
 
 The processes list is returned as a JSON object containing list of timestamps and processes for the container for the last `N` *intervals* (`N` can be set with *count* get param).
 

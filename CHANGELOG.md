@@ -1,3 +1,8 @@
+## v0.1.4 [2015-04-24]
+
+- Fixed parsing for non-Docker cgroups
+- Added support of Docker 1.6
+
 ## v0.1.3 [2015-04-24]
 
 - Fixed compilation on go < 1.4

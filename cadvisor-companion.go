@@ -18,7 +18,7 @@ import (
 	proc "github.com/abulimov/cadvisor-companion/process"
 )
 
-var version = "0.1.3"
+var version = "0.1.4"
 
 // set up cli vars
 var argIP = flag.String("listen_ip", "", "IP to listen on, defaults to all IPs")
@@ -29,7 +29,7 @@ var history proc.HistoryDB
 
 // apiHandler handles http requests
 func apiHandler(res http.ResponseWriter, req *http.Request) {
-	var validPath = regexp.MustCompile("^/api/v1.0/([a-zA-Z0-9/]+)/processes$")
+	var validPath = regexp.MustCompile("^/api/v1.0/(.+)/processes$")
 
 	// validate requested URL
 	m := validPath.FindStringSubmatch(req.URL.Path)
