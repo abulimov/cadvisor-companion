@@ -72,7 +72,7 @@ func ReadProcessCgroup(path string) (string, error) {
 	}
 	cgroupString := string(dataBytes)
 	lines := strings.Split(cgroupString, "\n")
-	var validLine = regexp.MustCompile("^[0-9]+:([a-z,]+):([a-z0-9./]+)$")
+	var validLine = regexp.MustCompile("^[0-9]+:(.+):(.+)$")
 	for _, l := range lines {
 		m := validLine.FindStringSubmatch(l)
 		if m == nil {

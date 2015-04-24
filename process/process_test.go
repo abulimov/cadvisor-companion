@@ -34,12 +34,25 @@ func TestReadProcessCgroupDocker(t *testing.T) {
 	}
 }
 
+func TestReadProcessCgroupDockerSystemd(t *testing.T) {
+	cgroup, err := ReadProcessCgroup("./testroot/proc/22291/cgroup")
+
+	if err != nil {
+		t.Fatal("process cgroup read fail", err)
+	}
+
+	expected := "/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope"
+	if cgroup != expected {
+		t.Errorf("%s not equal to expected %s", cgroup, expected)
+	}
+}
+
 func TestGetProcesses(t *testing.T) {
 	procs, err := GetProcesses("./testroot")
 	if err != nil {
 		t.Fatal("process reading fail", err)
 	}
-	expected := 6
+	expected := 7
 	if len(procs) != expected {
 		t.Errorf("%d not equal to expected %d", len(procs), expected)
 	}
@@ -60,7 +73,7 @@ func TestCPUTotalUsageNormal(t *testing.T) {
 		t.Fatal("process reading fail", err)
 	}
 	usage := procs.GetCPUTotalUsage()
-	expected := int64(108143)
+	expected := int64(110175)
 	if usage != expected {
 		t.Errorf("%d not equal to expected %d", usage, expected)
 	}

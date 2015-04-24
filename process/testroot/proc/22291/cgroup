@@ -1,0 +1,10 @@
+10:hugetlb:/
+9:blkio:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
+8:memory:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
+7:perf_event:/
+6:cpuset:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
+5:net_cls,net_prio:/
+4:cpu,cpuacct:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
+3:devices:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
+2:freezer:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
+1:name=systemd:/system.slice/docker-7dc0bf65ec30b7d45868963cf1186a18a42fcf30d5a2df2002678bd0a1b31cad.scope
