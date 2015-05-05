@@ -6,6 +6,7 @@ package process
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"time"
 )
@@ -41,7 +42,10 @@ func (history *HistoryDB) GetLastData(containerID string, interval, offset int) 
 	last := len(history) - offset
 	first := last - interval
 	entry1 := history[first][containerID]
-	entry2 := history[last][containerID]
+	entry2, ok := history[last][containerID]
+	if !ok {
+		return nil, fmt.Errorf("Container %s not found", containerID)
+	}
 	var procs List
 	cpu1 := entry1.Processes.GetCPUTotalUsage()
 	cpu2 := entry2.Processes.GetCPUTotalUsage()

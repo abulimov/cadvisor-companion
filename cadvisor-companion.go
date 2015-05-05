@@ -76,11 +76,9 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 	var result []proc.Snapshot
 	var ps *proc.Snapshot
 	fail := func(err error) {
-		message := map[string]string{"error": err.Error()}
-		messageJSON, _ := json.Marshal(message)
 		fmt.Printf("Error: %s\n", err.Error())
 		res.WriteHeader(500) // HTTP 500
-		io.WriteString(res, string(messageJSON))
+		io.WriteString(res, err.Error())
 		return
 	}
 
@@ -105,21 +103,26 @@ func apiHandler(res http.ResponseWriter, req *http.Request) {
 	io.WriteString(res, string(jsonResult))
 }
 
-// collectData scrapes procs data for all containers every second
+// collectData scrapes procs data for all containers
 // and keeps it in global history var
 func collectData(rootPath string) {
-	for _ = range time.Tick(time.Second) {
-		timeStamp := time.Now()
-		// get all processes without cgroup grouping
-		allProcs, _ := proc.GetProcesses(rootPath)
-		// group all processes by their cgroups
-		cgroupsProcs := allProcs.GetCgroupsMap()
+	timeStamp := time.Now()
+	// get all processes without cgroup grouping
+	allProcs, _ := proc.GetProcesses(rootPath)
+	// group all processes by their cgroups
+	cgroupsProcs := allProcs.GetCgroupsMap()
 
-		entry := make(proc.HistoryEntry)
-		for e, p := range cgroupsProcs {
-			entry[e] = proc.Snapshot{Timestamp: timeStamp, Processes: p}
-		}
-		history.Push(entry)
+	entry := make(proc.HistoryEntry)
+	for e, p := range cgroupsProcs {
+		entry[e] = proc.Snapshot{Timestamp: timeStamp, Processes: p}
+	}
+	history.Push(entry)
+}
+
+// collector runs collectData every second
+func collector(rootPath string) {
+	for _ = range time.Tick(time.Second) {
+		collectData(rootPath)
 	}
 }
 
@@ -149,7 +152,7 @@ func main() {
 	rootPath := getRootPath()
 
 	// start collecting data
-	go collectData(rootPath)
+	go collector(rootPath)
 
 	addr := fmt.Sprintf("%s:%d", *argIP, *argPort)
 	fmt.Printf("Starting cAdvisor-companion version: %q on port %d\n", version, *argPort)

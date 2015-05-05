@@ -111,6 +111,17 @@ func TestHistoryLastDataWrongConstraints(t *testing.T) {
 	}
 }
 
+func TestHistoryLastDataContainerName(t *testing.T) {
+	history, err := prepareHistory()
+	if err != nil {
+		t.Fatal("preparing history failed", err)
+	}
+	_, err = history.GetLastData("missing", 1, 1)
+	if err == nil {
+		t.Error("GetLastData with wrong container name didn't failed when expected to fail")
+	}
+}
+
 func TestHistoryTopCPU(t *testing.T) {
 	history, err := prepareHistory()
 	if err != nil {
